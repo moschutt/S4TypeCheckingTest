@@ -1,0 +1,132 @@
+---
+title: "Using S4 methods for type checking"
+output:
+html_document: default
+html_notebook: default
+---
+
+R is a weekly typed language.  This can cause issues for programmers using libraries by not learning
+of issues with calls until the call is made or recieving cryptic messags when an invalid type is passed
+to a function and somewhere in the bowls of said function that invalid type causes a problem
+
+Basic first argument type checking can be done with the S3 object system but the S4 object system 
+provides multi-argument type checking.  Since S4 uses Generic Functions it is possible to use the S4
+system for type checking.
+
+**Refresher**: The S3 and S4 object systems separate the "object" part, the part with the data, from the
+methods.  So, it is possible to leverage the S4/S5 method dispatching without defining a new object type.  
+Therefore it is possible to use the S3 and S4 method dispatching to perform type checking on a function
+call without defnining a whole new object.
+
+First, lets show what happens when a function is called with invalid parameters.
+
+```{r error=TRUE}
+myFn = function(name, sex, age, ...) {
+  sprintf("%s is a %s who is %d years old.\n", name, sex, age) -> s
+  cat(s)
+}
+
+myFn("Mark", "M", 50)
+myFn(1, 4.3, "Spoon")
+```
+
+The first call worked fine, no issues.  The second, howevver had a problem because we passed in numbers
+for characters and characters for numbers.  The error message, though, is for the sprintf function 
+which is in the function we called.  Showing the Stack trace
+
+```
+Error in sprintf("%s is a %s who is %d years old.\n", name, sex, age) : invalid format '%d'; use format %s for character objects
+2.
+sprintf("%s is a %s who is %d years old.\n", name, sex, age)
+1.
+myFn(1, 4.3, "Spoon")
+
+```
+
+We see that myFn was called and then sprintf and then the error from sprintf.  It would be much nicer if
+the error were at the myFn, since we passed the incorrect values into it in the first place.  It would
+be even more helpful if it happened before the program ran so if this call were late in a long running
+program we find out right away instead of after the program runs for 2 cups of coffee and an
+uncomfortable conversation with the overly talkative cube mate.  Unfortunately you'll have to go to
+a strongly typed language for that, like Haskel.
+
+However, we can emulate stronger type checking using the _setGeneric()_ and _setMethod()_ functions.  Let's give it a try.
+
+```{r error=TRUE}
+myFn = NULL
+
+setGeneric('myFn',
+           def=function(name, sex, age, ...) {
+             standardGeneric('myFn')
+           })
+
+setMethod('myFn',
+          signature=signature(name='character',
+                              sex='character',
+                              age='numeric'),
+          definition=function(name, sex, age, ...) {
+            sprintf("%s is a cool %s who is %d years old.\n", name, sex, age) -> s
+            cat(s)
+          })
+
+myFn("Mark", "M", 50)
+myFn("Fred", "M", 100)
+myFn(1, 4.3, "Spoon")
+```
+
+This is a bit better, we can see from the output that the problem is with the call to myFn and that it
+wasn't able to find a signature for "numeric", "numeric", "character", vs. the less obvious sprintf 
+error.
+
+But, it's a bit more complicated to define the function.  Let's step through the parts to see what
+each one is doing.
+
+```
+myFn = NULL
+```
+
+First off, we need to make sure there aren't any possible previous definitions of _myFn()_.  This is because
+if R can't find a match for our function, it will fall back to the default version.  This is probably not
+what we want because then we get the sprintf error instead of the actual problem.
+
+We could have also `rm()` (removed) the function name, but if the function doesn't exist, _rm()_ will 
+error out, setting it to NULL doesn't do that.
+
+```
+setGeneric('myFn',
+def=function(name, sex, age, ...) {
+standardGeneric('myFn')
+})
+```
+
+The S4 object system uses Generic functions like the S3.  We need to register our generic function.  The
+_def_ named argument indicates the function to call when we see the _myFn()_ function called.  The default
+action is to call _standardGeneric()_ which dispatches the S4 function, passing it the name to dispatch.
+
+```
+setMethod('myFn',
+signature=signature(name='character',
+sex='character',
+age='numeric'),
+definition=function(name, sex, age, ...) {
+sprintf("%s is a cool %s who is %d years old.", name, sex, age) -> s
+cat(s)
+})
+```
+
+Next we call the _setMethod()_ function.  This creates a "Generic" S4 function.  The first argument is the
+name of the function as it will be called.  Next we specify the signature, this is what does the type
+checking.  When the S4 object system sees the function _myFn_ it looks for a version which has 
+three arguments of 'character', 'character', 'numeric' types in that order.  If it doesn't find one, then
+it complains.  The definition is the actual function.  You can either define it with an anonymous function
+as here or define a function and assign it here.  The defined function must have a different name, that is
+it can't be _myFn()_.  Also, defining a function and assigning it here means that function could be called
+directly if someone knows about it.  So, it's safest to define it as an anonymous function in the 
+_setMethod()_ call.
+
+# Citations
+Most of the ideas were borrowed from
+
+Modeling Data With Functional Programming in R
+by Brian Lee Yung Rowe
+web site: https://cartesianfaith.com/
